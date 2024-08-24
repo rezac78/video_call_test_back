@@ -47,14 +47,24 @@ const roomHandler = (socket) => {
       console.log(`Request with ID ${requestId} has been deleted.`);
     }
   };
-
-
+  const startSharing = ({ peerId, roomId }) => {
+    socket.to(roomId).emit("user-started-sharing", peerId);
+  };
+  const stopSharing = (roomId) => {
+    socket.to(roomId).emit("user-stopped-sharing", roomId);
+  };
+  const addMessage = ({ roomId, message }) => {
+    console.log({ message });
+  };
   socket.on("create-room", createRoom);
   socket.on("join-room", joinRoom);
   socket.on("get-call-requests", (callback) => {
     callback(callRequests);
   });
   socket.on("delete-call-request", deleteCall);
+  socket.on("start-sharing", startSharing);
+  socket.on("stop-sharing", stopSharing);
+  socket.on("send-message", addMessage);
 };
 
 module.exports = { roomHandler };

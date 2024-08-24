@@ -5,7 +5,7 @@ const callRequests = [];
 
 const roomHandler = (socket) => {
   const createRoom = ({ name, phoneNumber }) => {
-    const roomId = uuidV4();
+    const roomId = uuidV4().substring(0, 12);
     rooms[roomId] = [];
     const newCallRequest = {
       id: roomId,

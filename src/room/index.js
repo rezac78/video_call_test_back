@@ -1,12 +1,14 @@
 const { v4: uuidV4 } = require("uuid");
 
 const rooms = {};
+const chats = {};
 const callRequests = [];
 
 const roomHandler = (socket) => {
   const createRoom = ({ name, phoneNumber }) => {
     const roomId = uuidV4().substring(0, 12);
     rooms[roomId] = [];
+    chats[roomId] = [];
     const newCallRequest = {
       id: roomId,
       name,
@@ -17,21 +19,20 @@ const roomHandler = (socket) => {
     socket.emit("room-created", { roomId });
 
     socket.broadcast.emit("new-call-request", newCallRequest);
-    console.log("user created the room", name, phoneNumber);
   };
+
   const joinRoom = ({ roomId, peerId }) => {
-    if (rooms[roomId]) {
-      console.log("user joined the room", roomId, peerId);
-      rooms[roomId].push(peerId);
-      socket.join(roomId);
-      socket.to(roomId).emit("user-joined", { peerId });
-      socket.emit("get-users", {
-        roomId,
-        participants: rooms[roomId],
-      });
-    }
+    if (!rooms[roomId]) rooms[roomId] = [];
+    socket.emit("get-messages", chats[roomId]);
+    rooms[roomId].push(peerId);
+    socket.join(roomId);
+    socket.emit("user-joined", { peerId });
+    socket.to(roomId).emit("user-joined", { peerId });
+    socket.emit("get-users", {
+      roomId,
+      participants: rooms[roomId],
+    });
     socket.on("disconnect", () => {
-      console.log("user left room", peerId);
       leaveRoom({ roomId, peerId });
     });
   };
@@ -40,13 +41,14 @@ const roomHandler = (socket) => {
     rooms[roomId] = rooms[roomId].filter((id) => id !== peerId);
     socket.to(roomId).emit("user-disconnected", peerId);
   };
+
   const deleteCall = (requestId) => {
     const index = callRequests.findIndex((request) => request.id === requestId);
     if (index !== -1) {
       callRequests.splice(index, 1);
-      console.log(`Request with ID ${requestId} has been deleted.`);
     }
   };
+
   const startSharing = ({ peerId, roomId }) => {
     socket.to(roomId).emit("user-started-sharing", peerId);
   };
@@ -54,8 +56,22 @@ const roomHandler = (socket) => {
     socket.to(roomId).emit("user-stopped-sharing", roomId);
   };
   const addMessage = ({ roomId, message }) => {
-    console.log({ message });
+    if (Array.isArray(chats[roomId])) {
+      chats[roomId].push(message);
+    } else {
+      chats[roomId] = [message];
+      
+    }
+
+    socket.to(roomId).emit("add-message", message);
   };
+
+  socket.on("send-message", (roomId, message) => {
+console.log(roomId)
+console.log(message)
+    addMessage({ roomId, message });
+});
+
   socket.on("create-room", createRoom);
   socket.on("join-room", joinRoom);
   socket.on("get-call-requests", (callback) => {
@@ -64,7 +80,6 @@ const roomHandler = (socket) => {
   socket.on("delete-call-request", deleteCall);
   socket.on("start-sharing", startSharing);
   socket.on("stop-sharing", stopSharing);
-  socket.on("send-message", addMessage);
 };
 
 module.exports = { roomHandler };

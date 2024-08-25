@@ -38,8 +38,19 @@ const roomHandler = (socket) => {
   };
 
   const leaveRoom = ({ peerId, roomId }) => {
-    rooms[roomId] = rooms[roomId].filter((id) => id !== peerId);
-    socket.to(roomId).emit("user-disconnected", peerId);
+    if (rooms[roomId]) {
+      rooms[roomId] = rooms[roomId].filter((id) => id !== peerId);
+      socket.to(roomId).emit("user-disconnected", peerId);
+
+      if (rooms[roomId].length === 0) {
+        delete rooms[roomId];
+        delete chats[roomId];
+      }
+    }
+    socket.on("delete-call-request", (requestId) => {
+      deleteCall(requestId);
+      socket.leave(requestId);
+    });
   };
 
   const deleteCall = (requestId) => {
@@ -60,17 +71,16 @@ const roomHandler = (socket) => {
       chats[roomId].push(message);
     } else {
       chats[roomId] = [message];
-      
     }
 
     socket.to(roomId).emit("add-message", message);
   };
 
   socket.on("send-message", (roomId, message) => {
-console.log(roomId)
-console.log(message)
+    console.log(roomId);
+    console.log(message);
     addMessage({ roomId, message });
-});
+  });
 
   socket.on("create-room", createRoom);
   socket.on("join-room", joinRoom);

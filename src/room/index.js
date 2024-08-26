@@ -14,6 +14,9 @@ const roomHandler = (socket) => {
       name,
       phoneNumber,
       timestamp: Date.now(),
+
+
+      inCall: false,
     };
     callRequests.push(newCallRequest);
     socket.emit("room-created", { roomId });
@@ -26,6 +29,13 @@ const roomHandler = (socket) => {
     socket.emit("get-messages", chats[roomId]);
     rooms[roomId].push(peerId);
     socket.join(roomId);
+    socket.emit("user-joined", { peerId });
+    socket.to(roomId).emit("user-joined", { peerId });
+    const callRequest = callRequests.find((request) => request.id === roomId);
+    if (callRequest) {
+      callRequest.inCall = true;
+      socket.broadcast.emit("update-call-request", callRequest);
+    }
     socket.emit("user-joined", { peerId });
     socket.to(roomId).emit("user-joined", { peerId });
     socket.emit("get-users", {
@@ -56,7 +66,8 @@ const roomHandler = (socket) => {
   const deleteCall = (requestId) => {
     const index = callRequests.findIndex((request) => request.id === requestId);
     if (index !== -1) {
-      callRequests.splice(index, 1);
+      const deletedRequest = callRequests.splice(index, 1)[0];
+      socket.broadcast.emit("call-request-deleted", deletedRequest.id);
     }
   };
 

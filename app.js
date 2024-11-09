@@ -2,11 +2,16 @@ const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
 const cors = require("cors");
+const dotEnv = require("dotenv");
 const { roomHandler } = require("./src/room");
+const connectDB = require("./config/db");
+const callRequestRoutes = require("./routes/callRequests");
+dotEnv.config({ path: "./config/config.env" });
+connectDB();
 
 const app = express();
 app.use(cors());
-
+app.use(express.json());
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
@@ -16,11 +21,14 @@ const io = new Server(server, {
 });
 
 io.on("connection", (socket) => {
-  console.log("user is connected");
   roomHandler(socket);
   socket.on("disconnect", () => {
     console.log("user is disconnected");
   });
 });
-
-server.listen(4000, () => console.log("Server is running on port 4000"));
+// Select a port
+app.use("/api", callRequestRoutes);
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+  console.log(`Server running in mode on port ${PORT}`);
+});

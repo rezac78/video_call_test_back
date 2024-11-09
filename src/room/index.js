@@ -1,57 +1,139 @@
 const { v4: uuidV4 } = require("uuid");
-
+const axios = require("axios");
+const Session = require("../../models/sessionSchema");
 const rooms = {};
 const chats = {};
 const callRequests = [];
+const formatDateForSQL = (date) => {
+  const utcDate = new Date(date);
+  const tehranOffsetMs = 3.5 * 3600 * 1000;
+  const tehranDate = new Date(utcDate.getTime() + tehranOffsetMs);
+  const year = tehranDate.getUTCFullYear();
+  const month = (tehranDate.getUTCMonth() + 1).toString().padStart(2, "0");
+  const day = tehranDate.getUTCDate().toString().padStart(2, "0");
+  const hours = tehranDate.getUTCHours().toString().padStart(2, "0");
+  const minutes = tehranDate.getUTCMinutes().toString().padStart(2, "0");
+  const seconds = tehranDate.getUTCSeconds().toString().padStart(2, "0");
+
+  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+};
 
 const roomHandler = (socket) => {
-  const createRoom = ({ name, phoneNumber }) => {
+  const createRoom = async ({
+    name,
+    phoneNumber,
+    selectedItem,
+    user_id,
+    startDate,
+    endDate,
+    token,
+  }) => {
     const roomId = uuidV4().substring(0, 12);
+    startDate = new Date(startDate);
+    endDate = new Date(endDate);
     rooms[roomId] = [];
     chats[roomId] = [];
     const newCallRequest = {
       id: roomId,
       name,
       phoneNumber,
+      group_id: selectedItem,
+      user_id: user_id,
+      startDate,
+      endDate,
+      roomId,
       timestamp: Date.now(),
-
-
-      inCall: false,
     };
+    let session = await Session.findOne({ id: roomId });
+    if (!session) {
+      session = new Session(newCallRequest);
+      await session.save();
+    }
+
     callRequests.push(newCallRequest);
     socket.emit("room-created", { roomId });
-
     socket.broadcast.emit("new-call-request", newCallRequest);
+    try {
+      const payload = {
+        title: "مصاحبه کاری",
+        description: "test",
+        start_date: formatDateForSQL(startDate),
+        end_date: formatDateForSQL(endDate),
+        event_type: "online",
+        meet_url: `https://meet.hamrahanefarda.com/room/${roomId}`,
+      };
+      const response = await axios.post(
+        "https://u-profile.hamrahanefarda.com/api/events",
+        payload,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+    } catch (error) {
+      if (error.response) {
+        console.error("Error calling API:", error.response.data);
+      } else {
+        console.error("Error:", error.message);
+      }
+    }
+    setTimeout(() => {
+      const requestIndex = callRequests.findIndex(
+        (request) => request.id === roomId
+      );
+      if (requestIndex !== -1) {
+        callRequests.splice(requestIndex, 1);
+        socket.emit("call-request-expired", { roomId });
+        socket.broadcast.emit("call-request-expired", { roomId });
+      }
+    }, 900000);
   };
 
-  const joinRoom = ({ roomId, peerId }) => {
+  const joinRoom = async ({ roomId, peerId }) => {
+    let session = await Session.findOne({ id: roomId });
+    if (!session) {
+      socket.emit("error", "اتاق یافت نشد");
+      return;
+    }
+    const currentTime = new Date();
+    const isWithinTimeRange =
+      currentTime >= session.startDate && currentTime <= session.endDate;
+    if (!isWithinTimeRange) {
+      socket.emit("error", "اتاق در این زمان فعال نیست");
+      return;
+    }
     if (!rooms[roomId]) rooms[roomId] = [];
+    if (!chats[roomId]) chats[roomId] = [];
     socket.emit("get-messages", chats[roomId]);
     rooms[roomId].push(peerId);
     socket.join(roomId);
-    socket.emit("user-joined", { peerId });
-    socket.to(roomId).emit("user-joined", { peerId });
-    const callRequest = callRequests.find((request) => request.id === roomId);
-    if (callRequest) {
-      callRequest.inCall = true;
-      socket.broadcast.emit("update-call-request", callRequest);
-    }
     socket.emit("user-joined", { peerId });
     socket.to(roomId).emit("user-joined", { peerId });
     socket.emit("get-users", {
       roomId,
       participants: rooms[roomId],
     });
+    session.isAnswered = true;
+    session.isActive = true;
+    await session.save();
     socket.on("disconnect", () => {
       leaveRoom({ roomId, peerId });
     });
   };
 
-  const leaveRoom = ({ peerId, roomId }) => {
+  const leaveRoom = async ({ peerId, roomId }) => {
     if (rooms[roomId]) {
       rooms[roomId] = rooms[roomId].filter((id) => id !== peerId);
       socket.to(roomId).emit("user-disconnected", peerId);
-
+      let session = await Session.findOne({ id: roomId });
+      if (session) {
+        const leaveTime = new Date();
+        const joinTime = session.timestamp;
+        const duration = (leaveTime - joinTime) / 1000;
+        session.duration = duration;
+        await session.save();
+      }
       if (rooms[roomId].length === 0) {
         delete rooms[roomId];
         delete chats[roomId];
@@ -66,8 +148,7 @@ const roomHandler = (socket) => {
   const deleteCall = (requestId) => {
     const index = callRequests.findIndex((request) => request.id === requestId);
     if (index !== -1) {
-      const deletedRequest = callRequests.splice(index, 1)[0];
-      socket.broadcast.emit("call-request-deleted", deletedRequest.id);
+      callRequests.splice(index, 1);
     }
   };
 
@@ -83,16 +164,23 @@ const roomHandler = (socket) => {
     } else {
       chats[roomId] = [message];
     }
-
     socket.to(roomId).emit("add-message", message);
   };
+  socket.on(
+    "update-microphone-status",
+    ({ peerId, microphoneStatus, roomId }) => {
+      socket
+        .to(roomId)
+        .emit("update-microphone-status", { peerId, microphoneStatus });
+    }
+  );
 
+  socket.on("update-camera-status", ({ peerId, cameraStatus, roomId }) => {
+    socket.to(roomId).emit("update-camera-status", { peerId, cameraStatus });
+  });
   socket.on("send-message", (roomId, message) => {
-    console.log(roomId);
-    console.log(message);
     addMessage({ roomId, message });
   });
-
   socket.on("create-room", createRoom);
   socket.on("join-room", joinRoom);
   socket.on("get-call-requests", (callback) => {

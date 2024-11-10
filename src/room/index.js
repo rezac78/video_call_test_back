@@ -28,9 +28,21 @@ const roomHandler = (socket) => {
     endDate,
     token,
   }) => {
+    console.log("Creating room with details:", {
+      name,
+      phoneNumber,
+      selectedItem,
+      user_id,
+      startDate,
+      endDate,
+      token,
+    });
     const roomId = uuidV4().substring(0, 12);
     startDate = new Date(startDate);
     endDate = new Date(endDate);
+    console.log("Room ID:", roomId);
+    console.log("Start Date:", startDate);
+    console.log("End Date:", endDate);
     rooms[roomId] = [];
     chats[roomId] = [];
     const newCallRequest = {
@@ -48,11 +60,14 @@ const roomHandler = (socket) => {
     if (!session) {
       session = new Session(newCallRequest);
       await session.save();
+      console.log("New session created:", session);
     }
 
     callRequests.push(newCallRequest);
     socket.emit("room-created", { roomId });
     socket.broadcast.emit("new-call-request", newCallRequest);
+    console.log("Call request created and emitted:", newCallRequest);
+
     try {
       const payload = {
         title: "مصاحبه کاری",
@@ -62,6 +77,7 @@ const roomHandler = (socket) => {
         event_type: "online",
         meet_url: `https://meet.hamrahanefarda.com/room/${roomId}`,
       };
+      console.log("Sending API request with payload:", payload);
       const response = await axios.post(
         "https://u-profile.hamrahanefarda.com/api/events",
         payload,
@@ -71,6 +87,7 @@ const roomHandler = (socket) => {
           },
         }
       );
+      console.log("API response:", response.data);
     } catch (error) {
       if (error.response) {
         console.error("Error calling API:", error.response.data);
@@ -86,14 +103,17 @@ const roomHandler = (socket) => {
         callRequests.splice(requestIndex, 1);
         socket.emit("call-request-expired", { roomId });
         socket.broadcast.emit("call-request-expired", { roomId });
+        console.log("Call request expired:", roomId);
       }
     }, 900000);
   };
 
   const joinRoom = async ({ roomId, peerId }) => {
+    console.log("Joining room with ID:", roomId, "Peer ID:", peerId);
     let session = await Session.findOne({ id: roomId });
     if (!session) {
       socket.emit("error", "اتاق یافت نشد");
+      console.log("Room not found:", roomId);
       return;
     }
     const currentTime = new Date();
@@ -101,6 +121,7 @@ const roomHandler = (socket) => {
       currentTime >= session.startDate && currentTime <= session.endDate;
     if (!isWithinTimeRange) {
       socket.emit("error", "اتاق در این زمان فعال نیست");
+      console.log("Room is not active during this time:", roomId);
       return;
     }
     if (!rooms[roomId]) rooms[roomId] = [];
@@ -117,6 +138,7 @@ const roomHandler = (socket) => {
     session.isAnswered = true;
     session.isActive = true;
     await session.save();
+    console.log("User joined the room:", peerId, "Session updated:", session);
     socket.on("disconnect", () => {
       leaveRoom({ roomId, peerId });
     });
@@ -153,9 +175,11 @@ const roomHandler = (socket) => {
   };
 
   const startSharing = ({ peerId, roomId }) => {
+    console.log("User started sharing:", peerId, "Room ID:", roomId);
     socket.to(roomId).emit("user-started-sharing", peerId);
   };
   const stopSharing = (roomId) => {
+    console.log("User stopped sharing in room:", roomId);
     socket.to(roomId).emit("user-stopped-sharing", roomId);
   };
   const addMessage = ({ roomId, message }) => {
@@ -169,6 +193,11 @@ const roomHandler = (socket) => {
   socket.on(
     "update-microphone-status",
     ({ peerId, microphoneStatus, roomId }) => {
+      console.log("Microphone status update:", {
+        peerId,
+        microphoneStatus,
+        roomId,
+      });
       socket
         .to(roomId)
         .emit("update-microphone-status", { peerId, microphoneStatus });
@@ -176,6 +205,7 @@ const roomHandler = (socket) => {
   );
 
   socket.on("update-camera-status", ({ peerId, cameraStatus, roomId }) => {
+    console.log("Camera status update:", { peerId, cameraStatus, roomId });
     socket.to(roomId).emit("update-camera-status", { peerId, cameraStatus });
   });
   socket.on("send-message", (roomId, message) => {
